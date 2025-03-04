@@ -1,6 +1,6 @@
 # FSTIC - Forensic Speech Transmission Index Calculator
 
-![FLOUC Banner](https://img.shields.io/badge/DSTIC-Forensic%20Speech%20Transmission%20Index%20Calculator-blue)
+![FLOUC Banner](https://img.shields.io/badge/FSTIC-Forensic%20Speech%20Transmission%20Index%20Calculator-blue)
 ![License](https://img.shields.io/badge/License-GNU%20GPLv3-green)
 ![Python](https://img.shields.io/badge/Python-3.6%2B-blue)
 
