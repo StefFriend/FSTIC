@@ -36,13 +36,13 @@ pip install -r requirements.txt
 ### Basic Usage
 
 ```bash
-python main.py path/to/audiofile.wav --output ./results
+python fstic.py path/to/audiofile.wav --output ./results
 ```
 
 ### Advanced Options
 
 ```bash
-python main.py path/to/audio/directory --output ./results --window 500 --hop 250 --nopdf --file-ext wav,mp3
+python fstic.py path/to/audio/directory --output ./results --window 500 --hop 250 --nopdf --file-ext wav,mp3
 ```
 
 ### Arguments
