@@ -1,5 +1,9 @@
 # FSTIC - Forensic Speech Transmission Index Calculator
 
+![FLOUC Banner](https://img.shields.io/badge/DSTIC-Forensic%20Speech%20Transmission%20Index%20Calculator-blue)
+![License](https://img.shields.io/badge/License-GNU%20GPLv3-green)
+![Python](https://img.shields.io/badge/Python-3.6%2B-blue)
+
 FSTIC is a Python tool for analyzing speech intelligibility in audio files, particularly for forensic applications. It implements the Speech Transmission Index (STI) methodology based on the research paper by Costantini, Paoloni, and Todisco: ["Objective Speech Intelligibility Measures Based on Speech Transmission Index for Forensic Applications"](https://www.researchgate.net/publication/279467055_Objective_Speech_Intelligibility_Measures_Based_on_Speech_Transmission_Index_for_Forensic_Applications).
 
 ## Overview
@@ -93,6 +97,10 @@ The STI calculation follows the methodology described in the reference paper:
 This implementation is based on the method described in:
 
 Costantini, G., Paoloni, A., & Todisco, M. (2010). "Objective Speech Intelligibility Measures Based on Speech Transmission Index for Forensic Applications." AES 39th International Conference, Hillerød, Denmark.
+
+## License
+
+This project is licensed under the GNU General Public License v3.0 (GNU GPLv3) - see the LICENSE file for details.
 
 ## Contributing
 
