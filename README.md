@@ -102,6 +102,8 @@ Costantini, G., Paoloni, A., & Todisco, M. (2010). "Objective Speech Intelligibi
 
 This project is licensed under the GNU General Public License v3.0 (GNU GPLv3) - see the LICENSE file for details.
 
+If you use this software please cite this repo: [FSTIC - Forensic Speech Transmission Index Calculator (https://github.com/StefFriend/FSTIC)](https://github.com/StefFriend/FSTIC)
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
