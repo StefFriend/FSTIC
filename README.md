@@ -19,6 +19,7 @@ This tool is designed to provide objective measurements of speech intelligibilit
 - **Visualization**: Generates detailed charts showing waveform, spectrograms, and STI values
 - **PDF Reports**: Creates comprehensive PDF reports for documentation
 - **Batch Processing**: Supports processing multiple files in a directory
+- **Audio Comparison**: Directly compare STI metrics and visualizations between two audio files
 
 ## Installation
 
@@ -45,6 +46,12 @@ python fstic.py path/to/audiofile.wav --output ./results
 python fstic.py path/to/audio/directory --output ./results --window 500 --hop 250 --nopdf --file-ext wav,mp3
 ```
 
+### Comparing Two Audio Files
+
+```bash
+python fstic.py --compare path/to/file1.wav path/to/file2.wav --output ./comparison --window 500 --hop 250
+```
+
 ### Arguments
 
 - `input`: Path to audio file or directory containing audio files
@@ -53,6 +60,7 @@ python fstic.py path/to/audio/directory --output ./results --window 500 --hop 25
 - `--hop`: Hop size in milliseconds (default: 250)
 - `--nopdf`: Flag to disable PDF report generation
 - `--file-ext`: Comma-separated list of file extensions to process (default: processes common audio formats)
+- `--compare`: Compare two audio files side by side (requires two file paths as arguments)
 
 ## Core Functions
 
@@ -73,6 +81,7 @@ python fstic.py path/to/audio/directory --output ./results --window 500 --hop 25
 
 - `create_analysis_plots(audio_signal, sample_rate, times, sti, overall_sti, audio_filename)`: Generates analysis plots including waveform, spectrograms, and STI over time
 - `process_audio_file(audio_path, output_dir, window_ms, hop_ms, create_pdf)`: Processes a single audio file and generates all outputs
+- `compare_two_audio_files(file1, file2, output_dir, window_ms, hop_ms, create_pdf)`: Compares two audio files by processing both and generating side-by-side visualizations and comparison metrics
 
 ## Output Files
 
@@ -81,6 +90,11 @@ For each audio file, FSTIC generates:
 - PNG image with analysis charts
 - PDF report with complete analysis and metadata (optional)
 - Summary CSV for batch processing
+
+For audio file comparisons, FSTIC generates:
+- Comparison CSV with STI values from both files
+- Side-by-side comparison chart in PNG format
+- Comprehensive comparison PDF report with detailed metrics for both files
 
 ## Implementation Details
 
