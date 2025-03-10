@@ -293,7 +293,7 @@ def create_analysis_plots(audio_signal, sample_rate, times, sti, overall_sti, au
     return fig
 
 # -----------------------------------------------------------------------------------
-# NEW: Comparison plots for two files side by side (only 3 time ticks per axis)
+# Comparison plots for two files side by side (only 3 time ticks per axis)
 # -----------------------------------------------------------------------------------
 def create_comparison_plots(
     audio_signal1, fs1, times1, sti1, overall_sti1, name1,
@@ -548,7 +548,7 @@ def process_audio_file(audio_path, output_dir, window_ms, hop_ms, create_pdf=Tru
         return False, None
 
 # -----------------------------------------------------------------------------------
-# NEW: Function to compare two audio files side by side
+# Function to compare two audio files side by side
 # -----------------------------------------------------------------------------------
 def compare_two_audio_files(file1, file2, output_dir, window_ms, hop_ms, create_pdf=True):
     """
@@ -759,7 +759,7 @@ if __name__ == "__main__":
     parser.add_argument("--nopdf", action="store_true", help="Do not generate a PDF report")
     parser.add_argument("--file-ext", help="Filter only these file extensions (comma-separated). If omitted, it processes all common audio formats", default=None)
     
-    # New parameter for 2-file comparison
+    # Parameter for 2-file comparison
     parser.add_argument("--compare", nargs=2, help="Compare two audio files side by side. Usage: --compare fileA fileB")
     
     args = parser.parse_args()
