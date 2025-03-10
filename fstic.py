@@ -14,18 +14,33 @@ import hashlib
 import argparse
 import glob
 
-# --- Function to read an audio file (supports WAV, MP3, etc.) ---
+# -----------------------------------------------------------------------------------
+# Utility function to format time as HH:MM:SS.mmm
+# -----------------------------------------------------------------------------------
+def format_time_hhmmssmmm(seconds_float):
+    """
+    Convert a floating-point 'seconds_float' into a time string HH:MM:SS.mmm
+    where HH, MM, SS are zero-padded and mmm = milliseconds.
+    """
+    hours = int(seconds_float // 3600)
+    remainder = seconds_float % 3600
+    minutes = int(remainder // 60)
+    seconds = remainder % 60
+    millis = int(round((seconds - int(seconds)) * 1000))
+    seconds = int(seconds)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
+
+# -----------------------------------------------------------------------------------
+# Function to read an audio file (supports WAV, MP3, etc.)
+# -----------------------------------------------------------------------------------
 def read_audio_file(filepath):
     """
     Reads the audio file from the specified 'filepath'. 
     It can handle multiple formats (WAV, MP3, etc.). 
     If the format is not directly supported by soundfile, it falls back to pydub.
     
-    Parameters:
-    filepath (str): Path to the audio file.
-    
     Returns:
-    tuple: A tuple (data, fs) where 'data' is a NumPy array of audio samples (mono) 
+    tuple: (data, fs) where 'data' is a NumPy array of audio samples (mono),
            and 'fs' is the sampling rate in Hz.
     """
     try:
@@ -48,7 +63,9 @@ def read_audio_file(filepath):
             data = data.mean(axis=1)
     return np.array(data, dtype=np.float64), fs
 
-# --- Function to design a one-octave bandpass filter (Butterworth) ---
+# -----------------------------------------------------------------------------------
+# Function to design a one-octave bandpass filter (Butterworth)
+# -----------------------------------------------------------------------------------
 def design_octave_band(fs, center_freq):
     """
     Designs a 4th-order Butterworth bandpass filter for one-octave band 
@@ -56,15 +73,10 @@ def design_octave_band(fs, center_freq):
     
     The frequency boundaries are center_freq / sqrt(2) and center_freq * sqrt(2).
     
-    Parameters:
-    fs (int): Sampling rate in Hz.
-    center_freq (float): Center frequency of the octave band.
-    
     Returns:
-    sos (ndarray or None): Second-order sections representation of the filter.
-                           Returns None if the filter cutoffs exceed the Nyquist limit.
+    sos (ndarray or None): second-order sections representation of the filter.
+                           Returns None if the filter cutoffs exceed Nyquist.
     """
-    # Calculate the frequency boundaries
     low = center_freq / math.sqrt(2)
     high = center_freq * math.sqrt(2)
     nyq = 0.5 * fs
@@ -77,37 +89,32 @@ def design_octave_band(fs, center_freq):
     sos = butter(N=4, Wn=[low_cut, high_cut], btype='bandpass', output='sos')
     return sos
 
-# --- Function to compute the STI according to the referenced paper ---
+# -----------------------------------------------------------------------------------
+# Function to compute STI (speech transmission index) for a single file
+# -----------------------------------------------------------------------------------
 def compute_sti(audio, fs, window_dur=0.5, hop_dur=0.25):
     """
     Computes the Speech Transmission Index (STI) for the given audio signal 'audio' 
     sampled at 'fs'. 
     
-    The main steps are:
+    Steps:
       1. Split into octave bands (centers: 125, 250, 500, 1000, 2000, 4000, 8000 Hz).
-      2. For each band: extract the local envelope by windowing the signal power
-         (Hanning window, equation (2) in the paper).
+      2. For each band: extract the local envelope by windowing the signal power.
       3. Compute the normalized envelope spectrum at 14 modulation frequencies (0.63–12.5 Hz).
-      4. Map to SNR in dB (limited between -15 and +15 dB), then convert to Transmission Index (TI) 
-         as in equation (5).
-      5. Compute the Modulation Transfer Index (MTI) for each band and finally compute 
-         the overall STI (equation (7)).
+      4. Map to SNR in dB, then convert to Transmission Index (TI).
+      5. Compute the Modulation Transfer Index (MTI) for each band and the overall STI.
     
-    The calculation is done over overlapping windows (default 0.5 s with 0.25 s hop).
-    
-    Parameters:
-    audio (ndarray): The audio signal (must be mono).
-    fs (int): Sampling rate in Hz.
-    window_dur (float): Window duration in seconds (default 0.5s).
-    hop_dur (float): Hop duration in seconds (default 0.25s).
+    The calculation is done over overlapping windows of duration 'window_dur' 
+    with a hop of 'hop_dur'.
     
     Returns:
-    tuple: Two arrays (time_stamps, sti_values) giving the STI over time.
+      (time_stamps, sti_values)
     """
-    # Define octave band centers and weights (empirical weighting across bands)
     band_centers = [125, 250, 500, 1000, 2000, 4000, 8000]
     band_weights = [0.01, 0.04, 0.146, 0.212, 0.308, 0.244, 0.04]
     nyquist = 0.5 * fs
+    
+    # Filter out any band that can't be designed properly for the given fs
     valid_bands = []
     valid_weights = []
     for center, w in zip(band_centers, band_weights):
@@ -117,7 +124,7 @@ def compute_sti(audio, fs, window_dur=0.5, hop_dur=0.25):
     valid_weights = np.array(valid_weights)
     valid_weights = valid_weights / valid_weights.sum()
     
-    # Filter the signal in each octave band
+    # Filter the signal in each valid octave band
     band_signals = {}
     for center, w in zip(valid_bands, valid_weights):
         sos = design_octave_band(fs, center)
@@ -132,14 +139,12 @@ def compute_sti(audio, fs, window_dur=0.5, hop_dur=0.25):
     
     # Parameters for local envelope extraction
     env_window = int(0.05 * fs)  # ~50 ms window
-    if env_window < 1:
-        env_window = 1
+    env_window = max(env_window, 1)
     env_hop = int(0.01 * fs)     # ~10 ms hop
-    if env_hop < 1:
-        env_hop = 1
+    env_hop = max(env_hop, 1)
     hann = np.hanning(env_window)
     
-    # Parameters for STI sliding window computation
+    # Parameters for STI sliding window
     frame_length = int(window_dur * fs)
     frame_step = int(hop_dur * fs)
     num_frames = 1 + max(0, (len(audio) - frame_length) // frame_step)
@@ -147,135 +152,124 @@ def compute_sti(audio, fs, window_dur=0.5, hop_dur=0.25):
     sti_values = []
     time_stamps = []
     
-    # Compute STI for each time window
     for i in range(num_frames):
         start = i * frame_step
         end = start + frame_length
         if end > len(audio):
             break
         segment_sti = 0.0
+        
         # Process each band
         for center, Wk in zip(valid_bands, valid_weights):
             x_band = band_signals[center][start:end]
             power = x_band**2
-            # Local envelope computation via moving window with a Hanning window
+            
+            # Local envelope computation
             if len(power) < len(hann):
                 pad_width = len(hann) - len(power)
                 power_padded = np.pad(power, (0, pad_width), 'constant', constant_values=0)
             else:
                 power_padded = power
+            
             envelope = np.convolve(power_padded, hann, mode='valid')[::env_hop]
             envelope = np.clip(envelope, a_min=0.0, a_max=None)
             
-            # Normalize envelope and compute its spectrum
             E = envelope
             if len(E) == 0:
                 continue
             sumE = np.sum(E)
             if sumE <= 1e-8:
                 continue
+            
+            # Compute the modulation index for standard mod freqs
             M_f = []
             N = len(E)
-            env_dt = env_hop / fs  # time interval between envelope samples
+            env_dt = env_hop / fs
             t = np.arange(N) * env_dt
-            # For each modulation frequency, compute the complex component
             for f in mod_freqs:
                 phi = 2 * np.pi * f * t
                 comp = np.dot(E, np.exp(-1j * phi))
                 m_val = (2.0 * abs(comp)) / sumE
-                if m_val > 1.0:
-                    m_val = 1.0
+                m_val = min(m_val, 1.0)
                 M_f.append(m_val)
             M_f = np.array(M_f)
             
-            # Compute SNR in dB (formula (4)) for each modulation frequency
+            # Compute SNR in dB
             eps = 1e-12
             M_sq = M_f**2
             M_sq = np.clip(M_sq, 0.0, 1.0 - 1e-9)
             snr_values = 10.0 * np.log10((M_sq + eps) / (1.0 - M_sq + eps))
-            # Limit SNR between -15 and +15 dB
+            # Clip SNR between -15 and +15 dB
             snr_values = np.clip(snr_values, -15.0, 15.0)
-            # Compute the Transmission Index (TI) (formula (5))
+            
+            # Transmission Index for each modulation frequency
             TI = (snr_values + 15.0) / 30.0
-            # Average TI for the band's Modulation Transfer Index (MTI)
             MTI_k = np.mean(TI)
             segment_sti += Wk * MTI_k
-        # Center time of the window
-        time_center = (start + frame_length/2) / fs
-        time_stamps.append(time_center)
+        
+        # Center time of the window (in seconds)
+        time_center_sec = (start + frame_length/2) / fs
+        
+        time_stamps.append(time_center_sec)
         sti_values.append(segment_sti)
     
     return np.array(time_stamps), np.array(sti_values)
 
-# --- Function to create analysis plots ---
+# -----------------------------------------------------------------------------------
+# Single-file analysis plots (only 3 time ticks: start, mid, end)
+# -----------------------------------------------------------------------------------
 def create_analysis_plots(audio_signal, sample_rate, times, sti, overall_sti, audio_filename):
     """
-    Creates analysis plots for the audio file:
+    Creates analysis plots for a single audio file:
       1. Waveform
-      2. Spectrogram (viridis colormap)
-      3. Spectrogram (magma colormap) limited to 20-4000 Hz
+      2. Spectrogram (viridis)
+      3. Spectrogram (magma, limited to 20-4000 Hz)
       4. STI over time
-    
-    Parameters:
-    audio_signal (ndarray): Audio data (mono).
-    sample_rate (int): Sampling rate in Hz.
-    times (ndarray): Time array corresponding to STI calculations.
-    sti (ndarray): Computed STI values over time.
-    overall_sti (float): The average STI over the entire audio file.
-    audio_filename (str): Name of the analyzed audio file.
-    
-    Returns:
-    matplotlib.figure.Figure: The figure containing the analysis plots.
+    Each subplot will show x-axis ticks only at 0s, mid, and end.
+    Returns a matplotlib Figure.
     """
-    fig, axs = plt.subplots(4, 1, figsize=(10, 10), sharex=True)
+    # Calculate total duration
+    total_duration = len(audio_signal) / sample_rate
+    mid_time = total_duration / 2.0
     
-    # Main title with the name of the file
-    fig.suptitle(f"STI Analysis: {audio_filename}", fontsize=14, fontweight='bold')
+    fig, axs = plt.subplots(4, 1, figsize=(9, 10))  # Further reduced width for better margins
     
-    # Formatter for the x-axis to display time in seconds with two decimals
-    time_formatter = ticker.FormatStrFormatter('%.2f')
+    # Removed main title
     
     # 1. Waveform
     t_audio = np.arange(len(audio_signal)) / sample_rate
-    axs[0].plot(t_audio, audio_signal, color='blue')
+    axs[0].plot(t_audio, audio_signal)
     axs[0].set_ylabel("Amplitude")
-    axs[0].set_title("Waveform")
+    axs[0].set_title("Waveform", pad=10)  # Added padding to the title
     axs[0].grid(True)
-    axs[0].xaxis.set_major_formatter(time_formatter)
     
-    # 2. Spectrogram with viridis colormap
+    # 2. Spectrogram with viridis
     NFFT = 2048
     noverlap = 1024
-    Pxx, freqs, bins, im = axs[1].specgram(audio_signal, NFFT=NFFT, Fs=sample_rate, 
-                                           noverlap=noverlap, cmap='viridis')
+    axs[1].specgram(audio_signal, NFFT=NFFT, Fs=sample_rate, noverlap=noverlap, cmap='viridis')
     axs[1].set_ylabel("Frequency (Hz)")
-    axs[1].set_title("Spectrogram")
+    axs[1].set_title("Spectrogram", pad=10)  # Added padding to the title
     axs[1].grid(True)
-    axs[1].xaxis.set_major_formatter(time_formatter)
     
-    # 3. Another spectrogram with magma colormap, limited to 20-4000 Hz
-    Pxx, freqs, bins, im = axs[2].specgram(audio_signal, NFFT=NFFT, Fs=sample_rate, 
-                                           noverlap=noverlap, cmap='magma')
+    # 3. Spectrogram with magma, limited to 20-4000 Hz
+    axs[2].specgram(audio_signal, NFFT=NFFT, Fs=sample_rate, noverlap=noverlap, cmap='magma')
     axs[2].set_ylabel("Frequency (Hz)")
-    axs[2].set_title("Spectrogram (20-4000 Hz)")
+    axs[2].set_title("Spectrogram (20-4000 Hz)", pad=10)  # Added padding to the title
     axs[2].set_ylim(20, 4000)
     axs[2].grid(True)
-    axs[2].xaxis.set_major_formatter(time_formatter)
     
-    # 4. STI step plot: each step represents a window ('post' style)
+    # 4. STI over time (step)
     axs[3].step(times, sti, where='post', color='red')
-    axs[3].set_xlabel("Time (s)")
     axs[3].set_ylabel("STI")
-    axs[3].set_title("STI Over Time")
+    axs[3].set_title("STI Over Time", pad=10)  # Added padding to the title
     axs[3].set_ylim(0, 1)
     axs[3].grid(True)
-    axs[3].xaxis.set_major_formatter(time_formatter)
     
-    # Horizontal line at the overall STI value
+    # Horizontal line for overall STI
     axs[3].axhline(y=overall_sti, color='darkred', linestyle='--', alpha=0.7)
     
-    # Text box for the average STI
-    text_box = axs[3].text(
+    # Text box
+    axs[3].text(
         0.95, 0.95, f'Mean STI: {overall_sti:.3f}', 
         transform=axs[3].transAxes,
         color='darkred', fontsize=10, fontweight='bold',
@@ -283,94 +277,187 @@ def create_analysis_plots(audio_signal, sample_rate, times, sti, overall_sti, au
         bbox=dict(facecolor='white', alpha=0.8, edgecolor='darkred', boxstyle='round,pad=0.5')
     )
     
-    # Force x-axis labels for all subplots
-    for ax in axs[:-1]:
-        ax.tick_params(labelbottom=True)
-    
-    # Set x-axis labels
+    # Set x-ticks and x-labels for each subplot
     for ax in axs:
-        ax.set_xlabel("Time (s)")
+        ax.set_xticks([0, mid_time, total_duration])
+        ax.set_xticklabels([
+            format_time_hhmmssmmm(0),
+            format_time_hhmmssmmm(mid_time),
+            format_time_hhmmssmmm(total_duration)
+        ])
+        ax.set_xlim([0, total_duration])
+        ax.set_xlabel("Time")
     
-    # Adequate spacing between subplots
     plt.tight_layout()
-    plt.subplots_adjust(hspace=0.5, top=0.9)
-    
+    plt.subplots_adjust(hspace=0.8, top=0.95, left=0.15, right=0.92)  # Adjusted margins to prevent cut-off
     return fig
 
-# --- Function to process a single audio file ---
+# -----------------------------------------------------------------------------------
+# NEW: Comparison plots for two files side by side (only 3 time ticks per axis)
+# -----------------------------------------------------------------------------------
+def create_comparison_plots(
+    audio_signal1, fs1, times1, sti1, overall_sti1, name1,
+    audio_signal2, fs2, times2, sti2, overall_sti2, name2
+):
+    """
+    Creates a figure with 4 rows and 2 columns, comparing:
+      Row 1: Waveform (File1 left, File2 right)
+      Row 2: Spectrogram (File1 left, File2 right)
+      Row 3: Spectrogram (limited freq) (File1 left, File2 right)
+      Row 4: STI over time (File1 left, File2 right)
+    
+    Only 3 x-axis ticks (start, mid, end) for each column.
+    """
+    total_duration1 = len(audio_signal1) / fs1
+    mid_time1 = total_duration1 / 2.0
+    
+    total_duration2 = len(audio_signal2) / fs2
+    mid_time2 = total_duration2 / 2.0
+    
+    fig, axs = plt.subplots(4, 2, figsize=(10.5, 12))  # Further reduced width for better margins
+    
+    # Removed main title
+    
+    NFFT = 2048
+    noverlap = 1024
+    
+    # Row 1: Waveforms
+    t1 = np.arange(len(audio_signal1)) / fs1
+    t2 = np.arange(len(audio_signal2)) / fs2
+    
+    # File1 waveform (left)
+    axs[0, 0].plot(t1, audio_signal1)
+    axs[0, 0].set_title(f"Waveform\n{name1}", pad=10)  # Added padding to the title
+    axs[0, 0].set_ylabel("Amplitude")
+    axs[0, 0].grid(True)
+    
+    # File2 waveform (right)
+    axs[0, 1].plot(t2, audio_signal2)
+    axs[0, 1].set_title(f"Waveform\n{name2}", pad=10)  # Added padding to the title
+    axs[0, 1].grid(True)
+    
+    # Row 2: Spectrogram (File1 left, File2 right)
+    axs[1, 0].specgram(audio_signal1, NFFT=NFFT, Fs=fs1, noverlap=noverlap, cmap='viridis')
+    axs[1, 0].set_ylabel("Frequency (Hz)")
+    axs[1, 0].set_title(f"Spectrogram\n{name1}", pad=10)  # Added padding to the title
+    axs[1, 0].grid(True)
+    
+    axs[1, 1].specgram(audio_signal2, NFFT=NFFT, Fs=fs2, noverlap=noverlap, cmap='viridis')
+    axs[1, 1].set_title(f"Spectrogram\n{name2}", pad=10)  # Added padding to the title
+    axs[1, 1].grid(True)
+    
+    # Row 3: Spectrogram limited 20-4000 Hz
+    axs[2, 0].specgram(audio_signal1, NFFT=NFFT, Fs=fs1, noverlap=noverlap, cmap='magma')
+    axs[2, 0].set_ylabel("Frequency (Hz)")
+    axs[2, 0].set_ylim(20, 4000)
+    axs[2, 0].set_title(f"Spectrogram (20-4000 Hz)\n{name1}", pad=10)  # Added padding to the title
+    axs[2, 0].grid(True)
+    
+    axs[2, 1].specgram(audio_signal2, NFFT=NFFT, Fs=fs2, noverlap=noverlap, cmap='magma')
+    axs[2, 1].set_ylim(20, 4000)
+    axs[2, 1].set_title(f"Spectrogram (20-4000 Hz)\n{name2}", pad=10)  # Added padding to the title
+    axs[2, 1].grid(True)
+    
+    # Row 4: STI over time (File1 left, File2 right)
+    axs[3, 0].step(times1, sti1, where='post', color='red')
+    axs[3, 0].axhline(y=overall_sti1, color='darkred', linestyle='--', alpha=0.7)
+    axs[3, 0].set_ylim(0, 1)
+    axs[3, 0].set_ylabel("STI")
+    axs[3, 0].set_title(f"STI Over Time\n{name1}", pad=10)  # Added padding to the title
+    axs[3, 0].grid(True)
+    
+    axs[3, 1].step(times2, sti2, where='post', color='red')
+    axs[3, 1].axhline(y=overall_sti2, color='darkred', linestyle='--', alpha=0.7)
+    axs[3, 1].set_ylim(0, 1)
+    axs[3, 1].set_ylabel("STI")
+    axs[3, 1].set_title(f"STI Over Time\n{name2}", pad=10)  # Added padding to the title
+    axs[3, 1].grid(True)
+    
+    # Set x-ticks for each column in each row
+    # Left column -> file1
+    for row in range(4):
+        axs[row, 0].set_xticks([0, mid_time1, total_duration1])
+        axs[row, 0].set_xticklabels([
+            format_time_hhmmssmmm(0),
+            format_time_hhmmssmmm(mid_time1),
+            format_time_hhmmssmmm(total_duration1)
+        ])
+        axs[row, 0].set_xlim([0, total_duration1])
+        axs[row, 0].set_xlabel("Time")
+    
+    # Right column -> file2
+    for row in range(4):
+        axs[row, 1].set_xticks([0, mid_time2, total_duration2])
+        axs[row, 1].set_xticklabels([
+            format_time_hhmmssmmm(0),
+            format_time_hhmmssmmm(mid_time2),
+            format_time_hhmmssmmm(total_duration2)
+        ])
+        axs[row, 1].set_xlim([0, total_duration2])
+        axs[row, 1].set_xlabel("Time")
+    
+    # Adjust spacing to reduce overlap
+    plt.tight_layout()
+    plt.subplots_adjust(hspace=0.8, wspace=0.5, top=0.95, left=0.15, right=0.92)  # Adjusted all margins to prevent cut-off
+    return fig
+
+# -----------------------------------------------------------------------------------
+# Single-file processing (returns: success, overall_sti)
+# -----------------------------------------------------------------------------------
 def process_audio_file(audio_path, output_dir, window_ms, hop_ms, create_pdf=True):
     """
     Processes a single audio file by computing STI and generating output files.
-    
-    Parameters:
-    audio_path (str): Path to the audio file to process.
-    output_dir (str): Folder to save the results.
-    window_ms (int): Window duration in milliseconds.
-    hop_ms (int): Hop duration in milliseconds.
-    create_pdf (bool): If True, a PDF report is generated.
-    
-    Returns:
-    tuple: (success, overall_sti) 
-           where 'success' is a boolean indicating if processing succeeded 
-           and 'overall_sti' is the computed average STI (or None on failure).
+    Returns (success, overall_sti).
     """
     try:
-        # Convert milliseconds to seconds
+        # Convert ms to s
         window_dur = window_ms / 1000.0
         hop_dur = hop_ms / 1000.0
         
-        # Create output folder if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
         
-        # Read the audio file
+        # Read audio
         audio_signal, sample_rate = read_audio_file(audio_path)
-        
-        # Extract file name without extension/path
         audio_filename = os.path.basename(audio_path)
         audio_name = os.path.splitext(audio_filename)[0]
         
-        # Compute STI over time
+        # Compute STI
         print(f"Processing {audio_filename} with window={window_ms}ms, hop={hop_ms}ms...")
         times, sti = compute_sti(audio_signal, sample_rate, window_dur=window_dur, hop_dur=hop_dur)
+        overall_sti = np.mean(sti) if len(sti) > 0 else 0.0
         
-        # Compute overall STI (mean of the STI values)
-        overall_sti = np.mean(sti)
-        
-        # Calculate file SHA256 hash
+        # SHA256
         with open(audio_path, 'rb') as f:
             file_hash = hashlib.sha256(f.read()).hexdigest()
         
         print(f"Overall STI (mean): {overall_sti:.3f}")
         print(f"SHA256: {file_hash}")
         
-        # Save STI results to a CSV file
+        # Save STI results to CSV, times in HH:MM:SS.mmm
         csv_filename = os.path.join(output_dir, f"sti_results_{audio_name}.csv")
         with open(csv_filename, "w") as f:
-            f.write("Time_s,STI\n")
+            f.write("Time,STI\n")
             for t, val in zip(times, sti):
-                f.write(f"{t:.3f},{val:.3f}\n")
-        
+                t_formatted = format_time_hhmmssmmm(t)
+                f.write(f"{t_formatted},{val:.3f}\n")
         print(f"STI results saved to {csv_filename}")
         
-        # Create analysis plots (once)
+        # Create plots
         fig_plots = create_analysis_plots(audio_signal, sample_rate, times, sti, overall_sti, audio_filename)
-        
-        # Save the plot with a name including the analyzed audio file
         plot_filename = os.path.join(output_dir, f"chart_{audio_name}.png")
         fig_plots.savefig(plot_filename)
+        plt.close(fig_plots)
         print(f"Plot saved to {plot_filename}")
         
-        # Create a PDF report (A4) if requested
+        # PDF report if requested
         if create_pdf:
             pdf_filename = os.path.join(output_dir, f"report_{audio_name}.pdf")
             with PdfPages(pdf_filename) as pdf:
-                # A4 document dimensions in inches
+                # A4 page
                 a4_width_inch, a4_height_inch = 8.27, 11.69
                 
-                # First page: header and audio file info
+                # First page: textual info
                 fig_info = plt.figure(figsize=(a4_width_inch, a4_height_inch))
-                
-                # Layout with appropriate margins
                 ax_header = plt.axes([0.1, 0.8, 0.8, 0.15])
                 ax_header.axis('off')
                 ax_info = plt.axes([0.1, 0.3, 0.8, 0.45])
@@ -378,62 +465,48 @@ def process_audio_file(audio_path, output_dir, window_ms, hop_ms, create_pdf=Tru
                 ax_footer = plt.axes([0.1, 0.05, 0.8, 0.1])
                 ax_footer.axis('off')
                 
-                # Header text
                 ax_header.text(0.5, 0.8, "STI ANALYSIS REPORT", 
                                horizontalalignment='center', fontsize=18, fontweight='bold')
                 ax_header.text(0.5, 0.5, f"File: {audio_filename}", 
                                horizontalalignment='center', fontsize=14)
-                
-                # Separator line
                 ax_header.axhline(y=0, color='gray', linestyle='-', linewidth=0.5)
                 
-                # Gather audio file info
+                # Audio info
                 frames = len(audio_signal)
                 rate = sample_rate
                 duration = frames / float(rate)
                 
-                # Convert duration to hh:mm:ss.mmm format
-                hours, remainder = divmod(duration, 3600)
-                minutes, seconds = divmod(remainder, 60)
-                milliseconds = int((seconds - int(seconds)) * 1000)
-                seconds = int(seconds)
-                formatted_duration = f"{int(hours):02d}:{int(minutes):02d}:{seconds:02d}.{milliseconds:03d}"
-                
-                # Additional info if the file is WAV
+                # Attempt more detailed info if WAV
                 try:
-                    with contextlib.closing(wave.open(audio_path, 'r')) as f:
-                        frames = f.getnframes()
-                        rate = f.getframerate()
-                        duration = frames / float(rate)
-                        channels = f.getnchannels()
-                        sampwidth = f.getsampwidth()
+                    with contextlib.closing(wave.open(audio_path, 'r')) as wf:
+                        frames_w = wf.getnframes()
+                        rate_w = wf.getframerate()
+                        duration_w = frames_w / float(rate_w)
+                        channels = wf.getnchannels()
+                        sampwidth = wf.getsampwidth()
                         format_info = f"{channels} channels, {sampwidth*8} bit"
-
-                        hours, remainder = divmod(duration, 3600)
-                        minutes, seconds = divmod(remainder, 60)
-                        milliseconds = int((seconds - int(seconds)) * 1000)
-                        seconds = int(seconds)
-                        formatted_duration = f"{int(hours):02d}:{int(minutes):02d}:{seconds:02d}.{milliseconds:03d}"
-
+                        # Overwrite stats with wave data
+                        frames = frames_w
+                        rate = rate_w
+                        duration = duration_w
                 except:
-                    # If not a WAV file, use the previously calculated info
-                    channels = 1  # After mono conversion
-                    format_info = "Converted to mono"
+                    format_info = "Converted/Unknown (Mono)"
                 
-                # Analysis parameters
+                # Format duration
+                dur_str = format_time_hhmmssmmm(duration)
+                
                 analysis_params = (
                     f"• Analysis window: {window_ms} ms\n"
                     f"• Hop interval: {hop_ms} ms\n"
                 )
                 
-                # File info text
                 info_text = (
                     "TECHNICAL SPECIFICATIONS\n\n"
                     f"• File name: {audio_filename}\n"
                     f"• Format: {format_info}\n"
                     f"• Sampling rate: {rate} Hz\n"
                     f"• Number of samples: {frames:,}\n"
-                    f"• Duration: {formatted_duration}\n\n"
+                    f"• Duration: {dur_str}\n\n"
                     f"ANALYSIS PARAMETERS\n\n"
                     f"{analysis_params}\n"
                     f"HASH\n\n"
@@ -441,12 +514,9 @@ def process_audio_file(audio_path, output_dir, window_ms, hop_ms, create_pdf=Tru
                     f"STI ANALYSIS RESULTS\n\n"
                     f"• Mean STI: {overall_sti:.3f}\n"
                 )
-                
-                # Additional STI statistics
-                sti_min = np.min(sti)
-                sti_max = np.max(sti)
-                sti_std = np.std(sti)
-                
+                sti_min = np.min(sti) if len(sti) > 0 else 0
+                sti_max = np.max(sti) if len(sti) > 0 else 0
+                sti_std = np.std(sti) if len(sti) > 0 else 0
                 info_text += f"• Min STI: {sti_min:.3f}\n"
                 info_text += f"• Max STI: {sti_max:.3f}\n"
                 info_text += f"• Standard Deviation: {sti_std:.3f}\n"
@@ -454,89 +524,301 @@ def process_audio_file(audio_path, output_dir, window_ms, hop_ms, create_pdf=Tru
                 ax_info.text(0, 1, info_text, fontsize=11, verticalalignment='top', 
                              horizontalalignment='left', linespacing=1.5)
                 
-                # Footer with page number
-                ax_footer.text(0.5, 0.2, f"Page 1/2", 
-                               horizontalalignment='center', fontsize=8)
+                ax_footer.text(0.5, 0.2, "Page 1/2", horizontalalignment='center', fontsize=8)
                 
-                # Save the first page
                 pdf.savefig(fig_info)
                 plt.close(fig_info)
                 
-                # Second page: reuse the already created figure
-                # Resize figure to A4
+                # Second page: the plots
+                # Recreate or reuse the same figure? We already closed it, so let's re-create:
+                fig_plots = create_analysis_plots(audio_signal, sample_rate, times, sti, overall_sti, audio_filename)
                 fig_plots.set_size_inches(a4_width_inch, a4_height_inch)
-                
-                # Update title for the PDF
-                fig_plots.suptitle(f"STI Analysis: {audio_filename}", fontsize=12, fontweight='bold', y=0.98)
-                
-                # Footer for page 2
+                # Adjust the figure margins for PDF output
+                plt.subplots_adjust(left=0.15, right=0.90, hspace=0.8, top=0.95)  # Further adjusted margins to prevent time cut-off
+                # Removed suptitle
                 fig_plots.text(0.5, 0.01, "Page 2/2", ha='center', fontsize=8)
-                
-                # Save the second page
                 pdf.savefig(fig_plots)
+                plt.close(fig_plots)
                 
-                print(f"PDF report saved to {pdf_filename}")
+            print(f"PDF report saved to {pdf_filename}")
         
-        plt.close('all')  # Close all Matplotlib figures
         return True, overall_sti
-        
     except Exception as e:
         print(f"Error while processing {audio_path}: {str(e)}")
         return False, None
 
-# --- Main: Processes audio files based on command-line parameters ---
+# -----------------------------------------------------------------------------------
+# NEW: Function to compare two audio files side by side
+# -----------------------------------------------------------------------------------
+def compare_two_audio_files(file1, file2, output_dir, window_ms, hop_ms, create_pdf=True):
+    """
+    Computes STI for two audio files and generates a side-by-side comparison plot and PDF.
+    Also creates a combined CSV with times in HH:MM:SS.mmm format, using the actual filenames in headers.
+    
+    Returns (success, sti_mean_file1, sti_mean_file2).
+    """
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Convert ms to s
+        window_dur = window_ms / 1000.0
+        hop_dur = hop_ms / 1000.0
+        
+        # Read both files
+        audio_signal1, fs1 = read_audio_file(file1)
+        audio_signal2, fs2 = read_audio_file(file2)
+        filename1 = os.path.basename(file1)  # keep extension as user requested
+        filename2 = os.path.basename(file2)
+        
+        name1 = os.path.splitext(filename1)[0]  # used for some titles
+        name2 = os.path.splitext(filename2)[0]
+        
+        print(f"Comparing:\n  File A: {file1}\n  File B: {file2}")
+        print(f"Using window={window_ms}ms, hop={hop_ms}ms...")
+        
+        # Compute STI for both
+        times1, sti1 = compute_sti(audio_signal1, fs1, window_dur=window_dur, hop_dur=hop_dur)
+        times2, sti2 = compute_sti(audio_signal2, fs2, window_dur=window_dur, hop_dur=hop_dur)
+        
+        overall_sti1 = np.mean(sti1) if len(sti1) > 0 else 0.0
+        overall_sti2 = np.mean(sti2) if len(sti2) > 0 else 0.0
+        
+        # Calculate STI statistics
+        sti1_min = np.min(sti1) if len(sti1) > 0 else 0
+        sti1_max = np.max(sti1) if len(sti1) > 0 else 0
+        sti1_std = np.std(sti1) if len(sti1) > 0 else 0
+        
+        sti2_min = np.min(sti2) if len(sti2) > 0 else 0
+        sti2_max = np.max(sti2) if len(sti2) > 0 else 0
+        sti2_std = np.std(sti2) if len(sti2) > 0 else 0
+        
+        # Calculate SHA256 for both
+        with open(file1, 'rb') as f:
+            hash1 = hashlib.sha256(f.read()).hexdigest()
+        with open(file2, 'rb') as f:
+            hash2 = hashlib.sha256(f.read()).hexdigest()
+        
+        print(f"File A STI: {overall_sti1:.3f}")
+        print(f"File B STI: {overall_sti2:.3f}")
+        
+        # Create combined CSV for comparison
+        # We'll merge times1 & times2 side by side. If one is shorter, we'll pad with empty.
+        csv_filename = os.path.join(output_dir, f"sti_comparison_{name1}_vs_{name2}.csv")
+        
+        max_len = max(len(times1), len(times2))
+        
+        # Use underscores for any spaces in filenames to keep CSV simpler
+        header_timeA = f"Time_{filename1.replace(' ', '_')}"
+        header_stiA = f"STI_{filename1.replace(' ', '_')}"
+        header_timeB = f"Time_{filename2.replace(' ', '_')}"
+        header_stiB = f"STI_{filename2.replace(' ', '_')}"
+        
+        with open(csv_filename, "w") as f:
+            f.write(f"{header_timeA},{header_stiA},{header_timeB},{header_stiB}\n")
+            for i in range(max_len):
+                if i < len(times1):
+                    tA_str = format_time_hhmmssmmm(times1[i])
+                    stiA_str = f"{sti1[i]:.3f}"
+                else:
+                    tA_str = ""
+                    stiA_str = ""
+                
+                if i < len(times2):
+                    tB_str = format_time_hhmmssmmm(times2[i])
+                    stiB_str = f"{sti2[i]:.3f}"
+                else:
+                    tB_str = ""
+                    stiB_str = ""
+                
+                f.write(f"{tA_str},{stiA_str},{tB_str},{stiB_str}\n")
+        
+        print(f"Comparison CSV saved to {csv_filename}")
+        
+        # Create side-by-side comparison plots
+        fig_compare = create_comparison_plots(
+            audio_signal1, fs1, times1, sti1, overall_sti1, name1,
+            audio_signal2, fs2, times2, sti2, overall_sti2, name2
+        )
+        
+        plot_filename = os.path.join(output_dir, f"chart_comparison_{name1}_vs_{name2}.png")
+        fig_compare.savefig(plot_filename)
+        plt.close(fig_compare)
+        print(f"Comparison plot saved to {plot_filename}")
+        
+        if create_pdf:
+            pdf_filename = os.path.join(output_dir, f"report_comparison_{name1}_vs_{name2}.pdf")
+            with PdfPages(pdf_filename) as pdf:
+                a4_width_inch, a4_height_inch = 8.27, 11.69
+                
+                # First page: textual summary for both files
+                fig_info = plt.figure(figsize=(a4_width_inch, a4_height_inch))
+                ax_header = plt.axes([0.1, 0.8, 0.8, 0.15])
+                ax_header.axis('off')
+                ax_info = plt.axes([0.1, 0.2, 0.8, 0.55])
+                ax_info.axis('off')
+                ax_footer = plt.axes([0.1, 0.05, 0.8, 0.1])
+                ax_footer.axis('off')
+                
+                ax_header.text(0.5, 0.8, "STI COMPARISON REPORT", 
+                               horizontalalignment='center', fontsize=18, fontweight='bold')
+                ax_header.text(0.5, 0.5, f"Files: {filename1} vs {filename2}", 
+                               horizontalalignment='center', fontsize=14)
+                ax_header.axhline(y=0, color='gray', linestyle='-', linewidth=0.5)
+                
+                # Info about File A
+                framesA = len(audio_signal1)
+                durA_sec = framesA / fs1 if fs1 > 0 else 0
+                durA = format_time_hhmmssmmm(durA_sec)
+                try:
+                    with contextlib.closing(wave.open(file1, 'r')) as wfA:
+                        chA = wfA.getnchannels()
+                        swA = wfA.getsampwidth()
+                        infoA = f"{chA} channels, {swA*8} bit"
+                except:
+                    infoA = "Converted/Unknown (Mono)"
+                
+                # Info about File B
+                framesB = len(audio_signal2)
+                durB_sec = framesB / fs2 if fs2 > 0 else 0
+                durB = format_time_hhmmssmmm(durB_sec)
+                try:
+                    with contextlib.closing(wave.open(file2, 'r')) as wfB:
+                        chB = wfB.getnchannels()
+                        swB = wfB.getsampwidth()
+                        infoB = f"{chB} channels, {swB*8} bit"
+                except:
+                    infoB = "Converted/Unknown (Mono)"
+                
+                info_text = (
+                    f"FILE A: {filename1}\n"
+                    f"  • Format: {infoA}\n"
+                    f"  • Sampling rate: {fs1} Hz\n"
+                    f"  • Number of samples: {framesA:,}\n"
+                    f"  • Duration: {durA}\n"
+                    f"  • SHA-256: {hash1}\n"
+                    f"  • Mean STI: {overall_sti1:.3f}\n"
+                    f"  • Min STI: {sti1_min:.3f}\n"
+                    f"  • Max STI: {sti1_max:.3f}\n"
+                    f"  • Standard Deviation: {sti1_std:.3f}\n\n"
+                    
+                    f"FILE B: {filename2}\n"
+                    f"  • Format: {infoB}\n"
+                    f"  • Sampling rate: {fs2} Hz\n"
+                    f"  • Number of samples: {framesB:,}\n"
+                    f"  • Duration: {durB}\n"
+                    f"  • SHA-256: {hash2}\n"
+                    f"  • Mean STI: {overall_sti2:.3f}\n"
+                    f"  • Min STI: {sti2_min:.3f}\n"
+                    f"  • Max STI: {sti2_max:.3f}\n"
+                    f"  • Standard Deviation: {sti2_std:.3f}\n\n"
+                    
+                    f"ANALYSIS PARAMETERS\n"
+                    f"  • Analysis window: {window_ms} ms\n"
+                    f"  • Hop interval: {hop_ms} ms\n"
+                )
+                
+                ax_info.text(0, 1, info_text, fontsize=11, verticalalignment='top', 
+                             horizontalalignment='left', linespacing=1.5)
+                ax_footer.text(0.5, 0.2, "Page 1/2", horizontalalignment='center', fontsize=8)
+                
+                pdf.savefig(fig_info)
+                plt.close(fig_info)
+                
+                # Second page: the comparison figure
+                # We'll recreate the comparison figure since we've closed it
+                fig_compare = create_comparison_plots(
+                    audio_signal1, fs1, times1, sti1, overall_sti1, name1,
+                    audio_signal2, fs2, times2, sti2, overall_sti2, name2
+                )
+                fig_compare.set_size_inches(a4_width_inch, a4_height_inch)
+                # Adjust the figure margins for PDF output
+                plt.subplots_adjust(left=0.15, right=0.90, hspace=0.8, wspace=0.5, top=0.95)  # Further adjusted margins to prevent time cut-off
+                # Removed suptitle
+                fig_compare.text(0.5, 0.01, "Page 2/2", ha='center', fontsize=8)
+                pdf.savefig(fig_compare)
+                plt.close(fig_compare)
+            
+            print(f"PDF comparison report saved to {pdf_filename}")
+        
+        return True, overall_sti1, overall_sti2
+    except Exception as e:
+        print(f"Error while comparing files:\n  {file1}\n  {file2}\n  Error: {e}")
+        return False, None, None
+
+# -----------------------------------------------------------------------------------
+# Main CLI
+# -----------------------------------------------------------------------------------
 if __name__ == "__main__":
-    # Configure command-line argument parser
-    parser = argparse.ArgumentParser(description="STI analysis for audio files")
+    parser = argparse.ArgumentParser(description="STI analysis for audio files (single, folder, or compare two).")
+    # Positional/optional
+    parser.add_argument("input", nargs="?", help="Audio file or folder. Not used when --compare is set.", default=None)
     
-    # Required parameters
-    parser.add_argument("input", help="Audio file or folder containing audio files to process")
     parser.add_argument("--output", help="Output folder for the results", default="./output")
-    
-    # Optional parameters
     parser.add_argument("--window", type=int, help="Analysis window length in milliseconds", default=500)
     parser.add_argument("--hop", type=int, help="Hop length in milliseconds", default=250)
     parser.add_argument("--nopdf", action="store_true", help="Do not generate a PDF report")
     parser.add_argument("--file-ext", help="Filter only these file extensions (comma-separated). If omitted, it processes all common audio formats", default=None)
     
+    # New parameter for 2-file comparison
+    parser.add_argument("--compare", nargs=2, help="Compare two audio files side by side. Usage: --compare fileA fileB")
+    
     args = parser.parse_args()
     
     # List of common audio file extensions (used if --file-ext is not specified)
     common_audio_extensions = ["wav", "mp3", "ogg", "flac", "aac", "wma", "m4a", "aiff", "opus"]
-    
-    # If --file-ext is specified, use those extensions; otherwise, use the default list
     if args.file_ext:
-        file_extensions = args.file_ext.lower().split(',')
-        file_extensions = [ext.strip() for ext in file_extensions]
+        file_extensions = [ext.strip().lower() for ext in args.file_ext.split(',')]
         print(f"Processing limited to extensions: {', '.join(file_extensions)}")
     else:
         file_extensions = common_audio_extensions
         print(f"Processing all common audio formats: {', '.join(file_extensions)}")
     
-    # Check if the input is a file or a folder
-    if os.path.isfile(args.input):
-        # Process a single file
-        print(f"Processing single file: {args.input}")
-        success, sti = process_audio_file(
-            args.input, 
-            args.output, 
-            args.window, 
-            args.hop, 
-            not args.nopdf
+    if args.compare:
+        # Comparison mode
+        fileA, fileB = args.compare
+        if not (os.path.isfile(fileA) and os.path.isfile(fileB)):
+            print("Error: --compare requires two valid files.")
+            exit(1)
+        
+        success, stiA, stiB = compare_two_audio_files(
+            fileA, fileB,
+            args.output,
+            args.window,
+            args.hop,
+            create_pdf=(not args.nopdf)
         )
         if success:
-            print(f"Processing successfully completed. STI: {sti:.3f}")
+            print(f"Comparison completed. STI {os.path.basename(fileA)}={stiA:.3f}, {os.path.basename(fileB)}={stiB:.3f}")
+        else:
+            print("Comparison failed.")
+        exit(0)
+    
+    # If not in compare mode, check the 'input'
+    if args.input is None:
+        print("Error: you must specify either an input file/folder or use --compare")
+        exit(1)
+    
+    # Check if input is a file or a directory
+    if os.path.isfile(args.input):
+        # Single file
+        print(f"Processing single file: {args.input}")
+        success, sti_val = process_audio_file(
+            args.input,
+            args.output,
+            args.window,
+            args.hop,
+            create_pdf=(not args.nopdf)
+        )
+        if success and sti_val is not None:
+            print(f"Processing successfully completed. STI: {sti_val:.3f}")
         else:
             print("Error while processing the file")
     
     elif os.path.isdir(args.input):
-        # Process all audio files in the folder with the specified extensions
+        # Folder mode
         print(f"Searching for audio files in folder: {args.input}")
-        
-        # Create a list of patterns to find the files
         patterns = [os.path.join(args.input, f"*.{ext}") for ext in file_extensions]
         
-        # Gather all matching audio files
         audio_files = []
         for pattern in patterns:
             audio_files.extend(glob.glob(pattern))
@@ -547,30 +829,26 @@ if __name__ == "__main__":
         
         print(f"Found {len(audio_files)} audio files to process")
         
-        # Create a summary CSV file
+        # Summary CSV
         summary_csv = os.path.join(args.output, "sti_summary.csv")
         os.makedirs(args.output, exist_ok=True)
         
         with open(summary_csv, "w") as f:
             f.write("Filename,STI_Mean,Success\n")
-            
-            # Process each audio file
             for audio_file in audio_files:
                 filename = os.path.basename(audio_file)
                 print(f"\nProcessing {filename}...")
                 
-                success, sti = process_audio_file(
-                    audio_file, 
-                    args.output, 
-                    args.window, 
-                    args.hop, 
-                    not args.nopdf
+                success, sti_val = process_audio_file(
+                    audio_file,
+                    args.output,
+                    args.window,
+                    args.hop,
+                    create_pdf=(not args.nopdf)
                 )
-                
-                # Add result to summary CSV
-                if success and sti is not None:
-                    f.write(f"{filename},{sti:.3f},1\n")
-                    print(f"  -> Success: STI = {sti:.3f}")
+                if success and sti_val is not None:
+                    f.write(f"{filename},{sti_val:.3f},1\n")
+                    print(f"  -> Success: STI = {sti_val:.3f}")
                 else:
                     f.write(f"{filename},N/A,0\n")
                     print(f"  -> Error: unable to compute STI")
@@ -581,4 +859,4 @@ if __name__ == "__main__":
         print(f"Error: '{args.input}' is neither a valid file nor a valid directory")
         exit(1)
     
-    print("\nProcessing completed")
+    print("\nProcessing completed.")
